@@ -1125,7 +1125,7 @@ if st.button(button_labels.get(spread_type, "✨ 开始占卜"), use_container_w
         st.session_state.draw_id = str(uuid.uuid4())
         st.session_state.spread_type = spread_type
         st.session_state.question = question.strip()
-        st.session_state.divination_mode = divination_mode
+        st.session_state.current_divination_mode = divination_mode
         st.session_state.target_name = target_name.strip() if divination_mode == "为TA占卜" else ""
         # 初始化追问状态（非每日运势模式）
         if spread_type != "每日运势":
