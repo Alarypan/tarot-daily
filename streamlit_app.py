@@ -642,7 +642,7 @@ def generate_share_image(cards, spread_type, question, reading_text, date_str, t
         draw.text((WIDTH // 2, y_offset), "— 追问解读 —", fill=GOLD_COLOR, font=subtitle_font, anchor="mt")
         y_offset += 35
         
-        for i, fh in enumerate(followup_history[:2], 1):  # 最多显示2个追问
+        for i, fh in enumerate(followup_history[:3], 1):  # 显示全部追问（最多3个）
             # 追问牌名
             followup_card_text = f"【追问{i}】{fh['card']['name_cn']}（{fh['orientation']}）"
             draw.text((PADDING, y_offset), followup_card_text, fill=GOLD_COLOR, font=card_name_font)
