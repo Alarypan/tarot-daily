@@ -6,7 +6,10 @@
 import streamlit as st
 import random
 import uuid
-from datetime import datetime
+import json
+import hashlib
+from datetime import datetime, timedelta
+from pathlib import Path
 import os
 
 # ========== 页面配置 ==========
@@ -447,10 +450,53 @@ PENTACLES = [
 FULL_DECK = MAJOR_ARCANA + WANDS + CUPS + SWORDS + PENTACLES
 
 IMG_BASE = "https://raw.githubusercontent.com/metabismuth/tarot-json/master/cards"
+HISTORY_FILE = Path("/tmp/tarot_history.json")
 
 
 def get_image_url(img_code: str) -> str:
     return f"{IMG_BASE}/{img_code}.jpg"
+
+
+def _load_all_history() -> dict:
+    if HISTORY_FILE.exists():
+        try:
+            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def _save_all_history(data: dict):
+    HISTORY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def save_user_draw(nickname: str, date_str: str, cards):
+    """保存用户抽牌记录"""
+    uid = hashlib.md5(nickname.encode()).hexdigest()[:10]
+    all_hist = _load_all_history()
+    if uid not in all_hist:
+        all_hist[uid] = {}
+    all_hist[uid][date_str] = [
+        {"name_cn": c["card"]["name_cn"], "orientation": c["orientation"], "position": c["position"]}
+        for c in cards
+    ]
+    # 只保留最近7天
+    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    all_hist[uid] = {k: v for k, v in all_hist[uid].items() if k >= cutoff}
+    _save_all_history(all_hist)
+
+
+def get_user_history(nickname: str, today: str, days: int = 3) -> list:
+    """获取用户前几天的历史"""
+    uid = hashlib.md5(nickname.encode()).hexdigest()[:10]
+    all_hist = _load_all_history()
+    user_hist = all_hist.get(uid, {})
+    recent = []
+    for i in range(1, days + 1):
+        past = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=i)).strftime("%Y-%m-%d")
+        if past in user_hist:
+            recent.append({"date": past, "cards": user_hist[past]})
+    return recent
 
 
 def draw_cards():
@@ -472,7 +518,7 @@ def draw_cards():
     return results
 
 
-def call_ai_reading(cards, date_str, api_key):
+def call_ai_reading(cards, date_str, api_key, history=None):
     """调用通义千问生成解读"""
     import requests
     
@@ -485,14 +531,34 @@ def call_ai_reading(cards, date_str, api_key):
             f"  含义：{c['meaning']}"
         )
     cards_text = "\n\n".join(card_summaries)
+
+    # 构建历史部分
+    history_section = ""
+    if history:
+        history_lines = []
+        for day in history:
+            card_strs = [f"{c['name_cn']}（{c['orientation']}）[{c['position']}]" for c in day["cards"]]
+            history_lines.append(f"  {day['date']}：{' | '.join(card_strs)}")
+        history_text = "\n".join(history_lines)
+        history_section = f"""
+
+【近期抽牌历史】
+{history_text}
+
+请在解读中额外增加一个段落：
+- 【运势流动】（100-150字）
+  结合近几天的牌面变化趋势，分析运势的整体走向
+  指出能量的转变方向（如：从低谷走向恢复、从迷茫到清晰等）
+  给出顺应趋势的建议"""
     
     prompt = f"""你是一位温暖、富有人文关怀的塔罗师。
 
 今天是 {date_str}，有人抽取了每日塔罗牌：
 
 {cards_text}
+{history_section}
 
-请用温暖的口吻生成约600-800字的解读，包含以下内容：
+请用温暖的口吻生成约600-800字的解读（有历史记录时约700-900字），包含以下内容：
 
 - 【第一张牌解读：{cards[0]['card']['name_cn']}（{cards[0]['orientation']}）】（80-100字）
   针对"过去"位置，解读这张牌在当前语境下的具体含义
@@ -553,12 +619,17 @@ today = datetime.now().strftime("%Y-%m-%d")
 weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][datetime.now().weekday()]
 st.markdown(f"<p style='text-align:center; color:#a098b0;'>📅 {today} {weekday}</p>", unsafe_allow_html=True)
 
+# 昵称输入（用于关联历史记录）
+nickname = st.text_input("输入你的昵称（可追踪运势变化）", placeholder="例如：小明", key="nickname_input")
+
 # 抽牌按钮
 if st.button("✨ 抽取今日塔罗牌", use_container_width=True):
-    # 每次点击都重新随机抽牌
     st.session_state.cards = draw_cards()
     st.session_state.reading = None
-    st.session_state.draw_id = str(uuid.uuid4())  # 唯一标识本次抽牌
+    st.session_state.draw_id = str(uuid.uuid4())
+    # 如果有昵称，保存本次抽牌记录
+    if nickname.strip():
+        save_user_draw(nickname.strip(), today, st.session_state.cards)
 
 # 显示牌面
 if "cards" in st.session_state and st.session_state.cards:
@@ -592,12 +663,17 @@ if "cards" in st.session_state and st.session_state.cards:
     
     # 从环境变量或secrets获取API Key
     api_key = os.environ.get("TONGYI_API_KEY") or st.secrets.get("TONGYI_API_KEY", "")
+
+    # 获取历史记录
+    history = []
+    if nickname.strip():
+        history = get_user_history(nickname.strip(), today, days=3)
     
     if api_key:
         # 只有当reading为None时才调用AI（缓存解读结果）
         if st.session_state.get("reading") is None:
             with st.spinner("正在为你解读今日运势..."):
-                reading = call_ai_reading(cards, today, api_key)
+                reading = call_ai_reading(cards, today, api_key, history)
                 if reading:
                     st.session_state.reading = reading
                 else:
@@ -616,6 +692,18 @@ if "cards" in st.session_state and st.session_state.cards:
             st.markdown(f"**【{c['position']} - {c['card']['name_cn']}（{c['orientation']}）】**")
             st.write(c["meaning"])
     
+    # 显示历史记录
+    if history:
+        st.markdown("---")
+        st.markdown("<h3 style='text-align:center;'>📜 近期牌面记录</h3>", unsafe_allow_html=True)
+        for day in history:
+            card_tags = ""
+            for c in day["cards"]:
+                color = "#90e0a0" if c["orientation"] == "正位" else "#e0a090"
+                mark = "↑" if c["orientation"] == "正位" else "↓"
+                card_tags += f'<span style="display:inline-block;padding:3px 10px;margin:2px;border-radius:6px;font-size:0.8em;background:rgba(255,255,255,0.06);color:{color};border:1px solid {color}30;">{c["name_cn"]} {mark}</span>'
+            st.markdown(f"<p style='color:#8880a0;margin-bottom:4px;'>{day['date']}</p>{card_tags}", unsafe_allow_html=True)
+
     # 祝福语
     st.markdown("<div class='blessing'>✨ 愿你今天平安喜乐 ✨</div>", unsafe_allow_html=True)
 
