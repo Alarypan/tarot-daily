@@ -1,6 +1,6 @@
 """
-塔罗牌每日运势 - Streamlit 网页版
-可部署到 Streamlit Cloud 分享给朋友
+塔罗牌灵感指引 - Streamlit 网页版
+支持多种牌阵，可部署到 Streamlit Cloud 分享给朋友
 """
 
 import streamlit as st
@@ -14,7 +14,7 @@ import os
 
 # ========== 页面配置 ==========
 st.set_page_config(
-    page_title="塔罗牌每日运势",
+    page_title="塔罗牌灵感指引",
     page_icon="🔮",
     layout="centered",
 )
@@ -452,6 +452,18 @@ FULL_DECK = MAJOR_ARCANA + WANDS + CUPS + SWORDS + PENTACLES
 IMG_BASE = "https://raw.githubusercontent.com/metabismuth/tarot-json/master/cards"
 HISTORY_FILE = Path("/tmp/tarot_history.json")
 
+# ========== 牌阵配置 ==========
+SPREADS = {
+    "每日运势": {"count": 3, "positions": ["过去", "现在", "未来"],
+                 "desc": "三张牌揭示今日运势走向"},
+    "问题指引": {"count": 3, "positions": ["现状", "障碍", "建议"],
+                 "desc": "针对具体问题给出指引方向"},
+    "单牌指引": {"count": 1, "positions": ["指引"],
+                 "desc": "一张牌给出核心启示"},
+    "二选一":   {"count": 5, "positions": ["核心", "选择A", "选择B", "A结果", "B结果"],
+                 "desc": "帮助在两个选项间看清方向"},
+}
+
 
 def get_image_url(img_code: str) -> str:
     return f"{IMG_BASE}/{img_code}.jpg"
@@ -499,17 +511,17 @@ def get_user_history(nickname: str, today: str, days: int = 3) -> list:
     return recent
 
 
-def draw_cards():
-    """随机抽取3张牌（每次点击都不同）"""
-    selected = random.sample(FULL_DECK, 3)
-    positions = ["过去", "现在", "未来"]
-    
+def draw_cards(spread_type="每日运势"):
+    """根据牌阵类型抽取对应数量的牌"""
+    spread = SPREADS[spread_type]
+    selected = random.sample(FULL_DECK, spread["count"])
+
     results = []
     for i, card in enumerate(selected):
         is_upright = random.choice([True, False])
         results.append({
             "card": card,
-            "position": positions[i],
+            "position": spread["positions"][i],
             "is_upright": is_upright,
             "orientation": "正位" if is_upright else "逆位",
             "keywords": card["upright"] if is_upright else card["reversed"],
@@ -518,29 +530,33 @@ def draw_cards():
     return results
 
 
-def call_ai_reading(cards, date_str, api_key, history=None):
-    """调用通义千问生成解读"""
-    import requests
-    
-    card_summaries = []
-    for c in cards:
-        card = c["card"]
-        card_summaries.append(
-            f"【{c['position']}】{card['name_cn']} - {c['orientation']}\n"
-            f"  关键词：{' / '.join(c['keywords'])}\n"
-            f"  含义：{c['meaning']}"
-        )
-    cards_text = "\n\n".join(card_summaries)
+def _render_card(c):
+    """渲染单张牌的显示"""
+    card = c["card"]
+    st.markdown(f"<p style='text-align:center; color:#a098b0;'>{c['position']}</p>", unsafe_allow_html=True)
+    img_url = get_image_url(card["img"])
+    if c["is_upright"]:
+        st.image(img_url, use_container_width=True)
+    else:
+        st.markdown(f"<img src='{img_url}' style='width:100%; transform:rotate(180deg);'>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center; color:#f0d890; font-weight:bold;'>{card['name_cn']}</p>", unsafe_allow_html=True)
+    ori_color = "#90e0a0" if c["is_upright"] else "#e0a090"
+    st.markdown(f"<p style='text-align:center; color:{ori_color}; font-size:0.9em;'>{'↑ 正位' if c['is_upright'] else '↓ 逆位'}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center; color:#b0a8c0; font-size:0.8em;'>{' / '.join(c['keywords'])}</p>", unsafe_allow_html=True)
 
-    # 构建历史部分
-    history_section = ""
-    if history:
-        history_lines = []
-        for day in history:
-            card_strs = [f"{c['name_cn']}（{c['orientation']}）[{c['position']}]" for c in day["cards"]]
-            history_lines.append(f"  {day['date']}：{' | '.join(card_strs)}")
-        history_text = "\n".join(history_lines)
-        history_section = f"""
+
+def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
+    """根据牌阵类型构建不同的 AI prompt"""
+
+    if spread_type == "每日运势":
+        history_section = ""
+        if history:
+            history_lines = []
+            for day in history:
+                card_strs = [f"{c['name_cn']}（{c['orientation']}）[{c['position']}]" for c in day["cards"]]
+                history_lines.append(f"  {day['date']}：{' | '.join(card_strs)}")
+            history_text = "\n".join(history_lines)
+            history_section = f"""
 
 【近期抽牌历史】
 {history_text}
@@ -550,8 +566,8 @@ def call_ai_reading(cards, date_str, api_key, history=None):
   结合近几天的牌面变化趋势，分析运势的整体走向
   指出能量的转变方向（如：从低谷走向恢复、从迷茫到清晰等）
   给出顺应趋势的建议"""
-    
-    prompt = f"""你是一位温暖、富有人文关怀的塔罗师。
+
+        return f"""你是一位温暖、富有人文关怀的塔罗师。
 
 今天是 {date_str}，有人抽取了每日塔罗牌：
 
@@ -589,6 +605,110 @@ def call_ai_reading(cards, date_str, api_key, history=None):
 
 要求：语言自然，像朋友聊天，避免AI套话，不要说"首先其次最后"。"""
 
+    elif spread_type == "问题指引":
+        return f"""你是一位温暖、富有人文关怀的塔罗师。
+
+今天是 {date_str}，有人就以下问题进行了塔罗占卜：
+
+问题：{question}
+
+牌阵：问题指引（现状 - 障碍 - 建议）
+
+{cards_text}
+
+请用温暖的口吻生成约500-700字的解读，包含以下内容：
+
+- 【现状解读：{cards[0]['card']['name_cn']}（{cards[0]['orientation']}）】（80-120字）
+  针对"现状"位置，解读这张牌反映出当前问题所处的状态和能量
+
+- 【障碍解读：{cards[1]['card']['name_cn']}（{cards[1]['orientation']}）】（80-120字）
+  针对"障碍"位置，解读目前面临的主要阻碍和需要克服的挑战
+
+- 【建议解读：{cards[2]['card']['name_cn']}（{cards[2]['orientation']}）】（80-120字）
+  针对"建议"位置，解读塔罗给出的行动方向和指引
+
+- 【综合分析】（120-160字）
+  结合三张牌和问题本身，给出整体分析和具体可操作的行动建议
+
+- 【核心提醒】（60-80字）
+  一句话总结这个问题的关键能量，给出最重要的行动指引
+
+要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。"""
+
+    elif spread_type == "单牌指引":
+        return f"""你是一位温暖、富有人文关怀的塔罗师。
+
+今天是 {date_str}，有人抽取了一张塔罗牌寻求指引：
+
+问题：{question}
+
+{cards_text}
+
+请用温暖的口吻生成约250-350字的解读，包含以下内容：
+
+- 【牌面解读：{cards[0]['card']['name_cn']}（{cards[0]['orientation']}）】（100-130字）
+  深入解读这张牌在问题语境下的含义，它想告诉你什么
+
+- 【行动指引】（80-100字）
+  基于牌面给出具体、可落地的建议
+
+- 【一句话点睛】（30-50字）
+  一句温暖有力的总结
+
+要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。"""
+
+    elif spread_type == "二选一":
+        return f"""你是一位温暖、富有人文关怀的塔罗师。
+
+今天是 {date_str}，有人面临选择，进行了二选一塔罗占卜：
+
+问题：{question}
+
+牌阵：二选一（核心 - 选择A - 选择B - A结果 - B结果）
+
+{cards_text}
+
+请用温暖的口吻生成约600-800字的解读，包含以下内容：
+
+- 【核心能量：{cards[0]['card']['name_cn']}（{cards[0]['orientation']}）】（80-100字）
+  解读你在这个选择中的核心状态和真实需求
+
+- 【选择A解读：{cards[1]['card']['name_cn']}（{cards[1]['orientation']}）】（80-100字）
+  解读选择A代表的能量和特质
+
+- 【选择B解读：{cards[2]['card']['name_cn']}（{cards[2]['orientation']}）】（80-100字）
+  解读选择B代表的能量和特质
+
+- 【A的可能走向：{cards[3]['card']['name_cn']}（{cards[3]['orientation']}）】（80-100字）
+  如果选择A，可能带来的发展和结果
+
+- 【B的可能走向：{cards[4]['card']['name_cn']}（{cards[4]['orientation']}）】（80-100字）
+  如果选择B，可能带来的发展和结果
+
+- 【综合建议】（100-150字）
+  综合五张牌的能量对比，客观分析各自的优劣势，帮助看清两条路的不同走向
+
+要求：紧扣问题"{question}"进行解读。不要直接告诉选A还是选B，而是分析各自的能量走向，尊重问卜者的自由意志。语言自然，像朋友聊天，避免AI套话。"""
+
+    return ""
+
+
+def call_ai_reading(cards, date_str, api_key, spread_type="每日运势", question="", history=None):
+    """调用通义千问生成解读"""
+    import requests
+
+    card_summaries = []
+    for c in cards:
+        card = c["card"]
+        card_summaries.append(
+            f"【{c['position']}】{card['name_cn']} - {c['orientation']}\n"
+            f"  关键词：{' / '.join(c['keywords'])}\n"
+            f"  含义：{c['meaning']}"
+        )
+    cards_text = "\n\n".join(card_summaries)
+
+    prompt = _build_prompt(cards, cards_text, date_str, spread_type, question, history)
+
     try:
         resp = requests.post(
             "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
@@ -608,12 +728,12 @@ def call_ai_reading(cards, date_str, api_key, history=None):
             return resp.json()["choices"][0]["message"]["content"]
         else:
             return None
-    except Exception as e:
+    except Exception:
         return None
 
 
 # ========== 主界面 ==========
-st.markdown("<h1 style='text-align:center;'>🔮 塔罗牌每日运势</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;'>🔮 塔罗牌灵感指引</h1>", unsafe_allow_html=True)
 
 today = datetime.now().strftime("%Y-%m-%d")
 weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][datetime.now().weekday()]
@@ -622,77 +742,133 @@ st.markdown(f"<p style='text-align:center; color:#a098b0;'>📅 {today} {weekday
 # 昵称输入（用于关联历史记录）
 nickname = st.text_input("输入你的昵称（可追踪运势变化）", placeholder="例如：小明", key="nickname_input")
 
+# 牌阵选择
+spread_names = list(SPREADS.keys())
+spread_type = st.selectbox(
+    "选择牌阵",
+    spread_names,
+    format_func=lambda x: f"{x} — {SPREADS[x]['desc']}",
+    key="spread_select",
+)
+
+# 问题输入（非每日运势时显示）
+question = ""
+if spread_type != "每日运势":
+    if spread_type == "二选一":
+        question = st.text_input(
+            "请描述你面临的选择",
+            placeholder="例如：应该换工作还是留在现在的公司？",
+            key="question_input",
+        )
+    else:
+        question = st.text_input(
+            "请输入你想测算的问题",
+            placeholder="例如：近期的感情发展如何？",
+            key="question_input",
+        )
+
 # 抽牌按钮
-if st.button("✨ 抽取今日塔罗牌", use_container_width=True):
-    st.session_state.cards = draw_cards()
-    st.session_state.reading = None
-    st.session_state.draw_id = str(uuid.uuid4())
-    # 如果有昵称，保存本次抽牌记录
-    if nickname.strip():
-        save_user_draw(nickname.strip(), today, st.session_state.cards)
+button_labels = {
+    "每日运势": "✨ 抽取今日运势",
+    "问题指引": "🔍 抽取问题指引",
+    "单牌指引": "🃏 抽取一张牌",
+    "二选一": "⚖️ 抽取二选一牌阵",
+}
+if st.button(button_labels.get(spread_type, "✨ 开始占卜"), use_container_width=True):
+    if spread_type != "每日运势" and not question.strip():
+        st.warning("请先输入你想测算的问题")
+    else:
+        st.session_state.cards = draw_cards(spread_type)
+        st.session_state.reading = None
+        st.session_state.draw_id = str(uuid.uuid4())
+        st.session_state.spread_type = spread_type
+        st.session_state.question = question.strip()
+        if nickname.strip():
+            save_user_draw(nickname.strip(), today, st.session_state.cards)
 
 # 显示牌面
 if "cards" in st.session_state and st.session_state.cards:
     cards = st.session_state.cards
-    
+    current_spread = st.session_state.get("spread_type", "每日运势")
+    current_question = st.session_state.get("question", "")
+
     st.markdown("---")
-    st.markdown("<h3 style='text-align:center;'>今日牌面</h3>", unsafe_allow_html=True)
-    
-    cols = st.columns(3)
-    for i, c in enumerate(cards):
-        card = c["card"]
-        with cols[i]:
-            st.markdown(f"<p class='card-position' style='text-align:center; color:#a098b0;'>{c['position']}</p>", unsafe_allow_html=True)
-            
-            img_url = get_image_url(card["img"])
-            if c["is_upright"]:
-                st.image(img_url, use_container_width=True)
-            else:
-                st.markdown(f"<img src='{img_url}' style='width:100%; transform:rotate(180deg);'>", unsafe_allow_html=True)
-            
-            st.markdown(f"<p style='text-align:center; color:#f0d890; font-weight:bold;'>{card['name_cn']}</p>", unsafe_allow_html=True)
-            
-            ori_color = "#90e0a0" if c["is_upright"] else "#e0a090"
-            st.markdown(f"<p style='text-align:center; color:{ori_color}; font-size:0.9em;'>{'↑ 正位' if c['is_upright'] else '↓ 逆位'}</p>", unsafe_allow_html=True)
-            
-            st.markdown(f"<p style='text-align:center; color:#b0a8c0; font-size:0.8em;'>{' / '.join(c['keywords'])}</p>", unsafe_allow_html=True)
-    
+
+    # 牌阵标题
+    spread_title = current_spread
+    if current_question:
+        spread_title += f" · {current_question}"
+    st.markdown(f"<h3 style='text-align:center;'>{spread_title}</h3>", unsafe_allow_html=True)
+
+    # 根据牌数调整布局
+    num_cards = len(cards)
+
+    if num_cards == 1:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            _render_card(cards[0])
+
+    elif num_cards == 3:
+        cols = st.columns(3)
+        for i, c in enumerate(cards):
+            with cols[i]:
+                _render_card(c)
+
+    elif num_cards == 5:
+        # 二选一：核心居中 + 两组对比
+        st.markdown("<p style='text-align:center;color:#8880a0;font-size:0.85em;'>— 核心 —</p>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            _render_card(cards[0])
+
+        st.markdown("<p style='text-align:center;color:#8880a0;font-size:0.85em;'>— 两个选择 —</p>", unsafe_allow_html=True)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            _render_card(cards[1])
+        with col_b:
+            _render_card(cards[2])
+
+        st.markdown("<p style='text-align:center;color:#8880a0;font-size:0.85em;'>— 选择结果 —</p>", unsafe_allow_html=True)
+        col_ra, col_rb = st.columns(2)
+        with col_ra:
+            _render_card(cards[3])
+        with col_rb:
+            _render_card(cards[4])
+
     # AI解读
     st.markdown("---")
-    st.markdown("<h3 style='text-align:center;'>✨ 运势解读</h3>", unsafe_allow_html=True)
-    
-    # 从环境变量或secrets获取API Key
+    st.markdown("<h3 style='text-align:center;'>✨ 灵感解读</h3>", unsafe_allow_html=True)
+
     api_key = os.environ.get("TONGYI_API_KEY") or st.secrets.get("TONGYI_API_KEY", "")
 
-    # 获取历史记录
+    # 历史记录仅用于每日运势
     history = []
-    if nickname.strip():
+    if current_spread == "每日运势" and nickname.strip():
         history = get_user_history(nickname.strip(), today, days=3)
-    
+
     if api_key:
-        # 只有当reading为None时才调用AI（缓存解读结果）
         if st.session_state.get("reading") is None:
-            with st.spinner("正在为你解读今日运势..."):
-                reading = call_ai_reading(cards, today, api_key, history)
-                if reading:
-                    st.session_state.reading = reading
-                else:
-                    st.session_state.reading = "fallback"
-        
+            with st.spinner("正在为你解读..."):
+                reading = call_ai_reading(
+                    cards, today, api_key,
+                    spread_type=current_spread,
+                    question=current_question,
+                    history=history,
+                )
+                st.session_state.reading = reading if reading else "fallback"
+
         if st.session_state.reading and st.session_state.reading != "fallback":
             st.markdown(f"<div class='reading-section'>{st.session_state.reading}</div>", unsafe_allow_html=True)
         else:
-            # 降级显示
             for c in cards:
                 st.markdown(f"**【{c['position']} - {c['card']['name_cn']}（{c['orientation']}）】**")
                 st.write(c["meaning"])
     else:
-        # 无API Key时显示基础解读
         for c in cards:
             st.markdown(f"**【{c['position']} - {c['card']['name_cn']}（{c['orientation']}）】**")
             st.write(c["meaning"])
-    
-    # 显示历史记录
+
+    # 历史记录展示（仅每日运势模式）
     if history:
         st.markdown("---")
         st.markdown("<h3 style='text-align:center;'>📜 近期牌面记录</h3>", unsafe_allow_html=True)
@@ -705,8 +881,8 @@ if "cards" in st.session_state and st.session_state.cards:
             st.markdown(f"<p style='color:#8880a0;margin-bottom:4px;'>{day['date']}</p>{card_tags}", unsafe_allow_html=True)
 
     # 祝福语
-    st.markdown("<div class='blessing'>✨ 愿你今天平安喜乐 ✨</div>", unsafe_allow_html=True)
+    st.markdown("<div class='blessing'>✨ 愿灵感照亮你的方向 ✨</div>", unsafe_allow_html=True)
 
 # 页脚
 st.markdown("---")
-st.markdown("<p style='text-align:center; color:#605878; font-size:0.8em;'>Rider-Waite Tarot · 78张完整牌组 · AI Powered</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#605878; font-size:0.8em;'>Rider-Waite Tarot · 78张完整牌组 · 多牌阵 · AI Powered</p>", unsafe_allow_html=True)
