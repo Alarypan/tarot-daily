@@ -1,0 +1,142 @@
+{
+  "2026-02-10": {
+    "cards": [
+      {
+        "name_cn": "命运之轮",
+        "name_en": "Wheel of Fortune",
+        "category": "大阿卡纳",
+        "suit": null,
+        "orientation": "正位",
+        "position": "过去",
+        "keywords": [
+          "转折",
+          "好运",
+          "命运",
+          "周期",
+          "机遇"
+        ]
+      },
+      {
+        "name_cn": "愚者",
+        "name_en": "The Fool",
+        "category": "大阿卡纳",
+        "suit": null,
+        "orientation": "正位",
+        "position": "现在",
+        "keywords": [
+          "新开始",
+          "冒险",
+          "纯真",
+          "信任",
+          "自由"
+        ]
+      },
+      {
+        "name_cn": "节制",
+        "name_en": "Temperance",
+        "category": "大阿卡纳",
+        "suit": null,
+        "orientation": "逆位",
+        "position": "未来",
+        "keywords": [
+          "失衡",
+          "过度",
+          "急躁",
+          "极端"
+        ]
+      }
+    ]
+  },
+  "2026-02-11": {
+    "cards": [
+      {
+        "name_cn": "圣杯十",
+        "name_en": "Ten of Cups",
+        "category": "小阿卡纳",
+        "suit": "圣杯",
+        "orientation": "逆位",
+        "position": "过去",
+        "keywords": [
+          "家庭矛盾",
+          "关系破裂",
+          "不和谐",
+          "理想幻灭"
+        ]
+      },
+      {
+        "name_cn": "宝剑王后",
+        "name_en": "Queen of Swords",
+        "category": "小阿卡纳",
+        "suit": "宝剑",
+        "orientation": "逆位",
+        "position": "现在",
+        "keywords": [
+          "冷酷",
+          "偏见",
+          "过度批判",
+          "情感压抑"
+        ]
+      },
+      {
+        "name_cn": "星币五",
+        "name_en": "Five of Pentacles",
+        "category": "小阿卡纳",
+        "suit": "星币",
+        "orientation": "逆位",
+        "position": "未来",
+        "keywords": [
+          "走出困境",
+          "获得帮助",
+          "恢复",
+          "转机"
+        ]
+      }
+    ]
+  },
+  "2026-02-12": {
+    "cards": [
+      {
+        "name_cn": "星币王后",
+        "name_en": "Queen of Pentacles",
+        "category": "小阿卡纳",
+        "suit": "星币",
+        "orientation": "正位",
+        "position": "过去",
+        "keywords": [
+          "持家",
+          "务实",
+          "滋养",
+          "财务管理"
+        ]
+      },
+      {
+        "name_cn": "隐士",
+        "name_en": "The Hermit",
+        "category": "大阿卡纳",
+        "suit": null,
+        "orientation": "逆位",
+        "position": "现在",
+        "keywords": [
+          "孤僻",
+          "逃避社交",
+          "过度封闭",
+          "迷失方向"
+        ]
+      },
+      {
+        "name_cn": "权杖二",
+        "name_en": "Two of Wands",
+        "category": "小阿卡纳",
+        "suit": "权杖",
+        "orientation": "正位",
+        "position": "未来",
+        "keywords": [
+          "规划",
+          "决策",
+          "远见",
+          "探索"
+        ]
+      }
+    ]
+  }
+}

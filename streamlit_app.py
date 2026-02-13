@@ -545,6 +545,219 @@ def _render_card(c):
     st.markdown(f"<p style='text-align:center; color:#b0a8c0; font-size:0.8em;'>{' / '.join(c['keywords'])}</p>", unsafe_allow_html=True)
 
 
+    st.markdown(f"<p style='text-align:center; color:#b0a8c0; font-size:0.8em;'>{' / '.join(c['keywords'])}</p>", unsafe_allow_html=True)
+
+
+def _render_followup_item(followup):
+    """渲染单条追问历史记录"""
+    st.markdown(f"""
+    <div style="
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(240, 216, 144, 0.15);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
+    ">
+        <h4 style="color:#f0d890; text-align:center;">🔄 第{followup['round']}轮追问</h4>
+        <p style="color:#b0a8c0; text-align:center; font-size:0.9em; font-style:italic;">
+            "{followup['question']}"
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 居中渲染追问牌
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        card = followup["card"]
+        img_url = get_image_url(card["img"])
+        if followup["is_upright"]:
+            st.image(img_url, use_container_width=True)
+        else:
+            st.markdown(f"<img src='{img_url}' style='width:100%; transform:rotate(180deg);'>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align:center; color:#f0d890; font-weight:bold;'>{card['name_cn']}</p>", unsafe_allow_html=True)
+        ori_color = "#90e0a0" if followup["is_upright"] else "#e0a090"
+        st.markdown(f"<p style='text-align:center; color:{ori_color}; font-size:0.9em;'>{'↑ 正位' if followup['is_upright'] else '↓ 逆位'}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align:center; color:#b0a8c0; font-size:0.8em;'>{' / '.join(followup['keywords'])}</p>", unsafe_allow_html=True)
+
+    # 追问解读
+    st.markdown(f"<div class='reading-section'>{followup['reading']}</div>", unsafe_allow_html=True)
+
+
+def _build_followup_prompt(initial_cards, initial_question, initial_reading,
+                           spread_type, followup_history, followup_card,
+                           followup_question, date_str):
+    """构建追问专用prompt，包含累积上下文 + 教练式引导"""
+
+    # 1. 初始牌阵摘要
+    initial_cards_desc = []
+    for c in initial_cards:
+        initial_cards_desc.append(f"{c['card']['name_cn']}（{c['orientation']}）[{c['position']}]")
+    initial_cards_text = " | ".join(initial_cards_desc)
+
+    reading_summary = (initial_reading or "")[:200]
+    if len(initial_reading or "") > 200:
+        reading_summary += "..."
+
+    # 2. 历史追问摘要
+    history_section = ""
+    if followup_history:
+        history_parts = []
+        for fh in followup_history:
+            rd_summary = (fh["reading"] or "")[:100]
+            if len(fh["reading"] or "") > 100:
+                rd_summary += "..."
+            history_parts.append(
+                f"第{fh['round']}轮追问：\n"
+                f"  问题：{fh['question']}\n"
+                f"  牌：{fh['card']['name_cn']}（{fh['orientation']}）\n"
+                f"  解读要点：{rd_summary}"
+            )
+        history_section = "\n\n".join(history_parts)
+
+    # 3. 当前追问牌面
+    card = followup_card["card"]
+    current_round = len(followup_history) + 1
+    question_display = followup_question if followup_question else "用户未提出具体问题，只是想再抽一张指引牌"
+
+    return f"""你是一位温暖、富有人文关怀的塔罗师，擅长用教练式提问帮助人们找到内心的答案。
+你精通心理学中的自我觉察、内在动机、情绪识别等方法，善于通过开放性问题引导人们深入思考。
+
+【初始占卜信息】
+日期：{date_str}
+牌阵：{spread_type}
+初始问题："{initial_question}"
+初始牌面：{initial_cards_text}
+初始解读摘要：{reading_summary}
+
+{"【历史追问记录】" + chr(10) + history_section if history_section else ""}
+
+【本轮追问 · 第{current_round}轮】
+用户追问："{question_display}"
+追问牌：{card['name_cn']} - {followup_card['orientation']}
+  关键词：{' / '.join(followup_card['keywords'])}
+  基础含义：{followup_card['meaning']}
+
+---
+
+请用温暖、富有启发性的口吻生成约400-600字的追问解读，包含以下内容：
+
+- 【追问牌解读：{card['name_cn']}（{followup_card['orientation']}）】（120-150字）
+  深入解读这张牌在当前累积语境下的含义，它为之前的占卜补充了什么新视角
+  要结合用户的追问内容进行针对性分析
+
+- 【与前文的脉络连接】（100-120字）
+  分析这张追问牌与初始牌阵{"及前几轮追问" if followup_history else ""}的呼应关系
+  它们共同讲述了一个怎样的事件发展脉络？能量在如何流动和变化？
+
+- 【教练式反思提问】（100-150字）
+  针对用户的追问和牌面信息，提出3-5个开放性问题，帮助ta深入思考：
+  这些问题要真诚有力，不是形式化的修辞，要能触动内心
+  例如：这张牌让你联想到生活中的哪个具体画面？你内心最真实的期待是什么？如果抛开外界评判，你的直觉告诉你什么？
+
+- 【温柔提醒】（60-80字）
+  如果发现用户有以下倾向，温和地点出供其自行判断：
+  • 反复纠结同一问题 → 也许现在需要的不是更多答案，而是迈出行动的勇气
+  • 期待外界拯救 → 温和指出力量一直在自己手中
+  • 过度焦虑未来 → 引导关注当下能做的小事
+  如果没有这些倾向，则给出一句温暖的鼓励
+
+【语气要求】
+- 温暖积极为主，像一个懂你的朋友在聊天
+- 不说教，不用"你应该"，用"不妨试试""也许可以"
+- 语言自然，避免AI套话
+- 坦诚但温柔：对风险和问题不回避，但用理解和支持的方式表达"""
+
+
+def _call_ai_followup_reading(initial_cards, initial_question, initial_reading,
+                              spread_type, followup_history, followup_card,
+                              followup_question, api_key):
+    """调用通义千问生成追问解读"""
+    import requests
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    prompt = _build_followup_prompt(
+        initial_cards=initial_cards,
+        initial_question=initial_question,
+        initial_reading=initial_reading,
+        spread_type=spread_type,
+        followup_history=followup_history,
+        followup_card=followup_card,
+        followup_question=followup_question,
+        date_str=date_str,
+    )
+
+    try:
+        resp = requests.post(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "qwen-plus",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 2000,
+                "temperature": 0.85,
+            },
+            timeout=120,
+        )
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"]
+        else:
+            return None
+    except Exception:
+        return None
+
+
+def _handle_followup_draw(followup_question):
+    """处理追问抽牌：抽牌 → 调用AI → 存入session_state"""
+    selected = random.sample(FULL_DECK, 1)[0]
+    is_upright = random.choice([True, False])
+
+    followup_card = {
+        "card": selected,
+        "is_upright": is_upright,
+        "orientation": "正位" if is_upright else "逆位",
+        "keywords": selected["upright"] if is_upright else selected["reversed"],
+        "meaning": selected["upright_meaning"] if is_upright else selected["reversed_meaning"],
+    }
+
+    api_key = os.environ.get("TONGYI_API_KEY") or st.secrets.get("TONGYI_API_KEY", "")
+
+    followup_reading = None
+    if api_key:
+        followup_reading = _call_ai_followup_reading(
+            initial_cards=st.session_state.cards,
+            initial_question=st.session_state.get("question", ""),
+            initial_reading=st.session_state.get("reading", ""),
+            spread_type=st.session_state.get("spread_type", ""),
+            followup_history=st.session_state.get("followup_history", []),
+            followup_card=followup_card,
+            followup_question=followup_question,
+            api_key=api_key,
+        )
+
+    if not followup_reading:
+        followup_reading = f"💡 **AI解读暂时无法生成，以下是牌面的基础含义：**\n\n{followup_card['meaning']}\n\n你可以结合前面的占卜结果，感受这张牌想告诉你什么。"
+
+    followup_count = st.session_state.get("followup_count", 0)
+    record = {
+        "round": followup_count + 1,
+        "question": followup_question if followup_question else "（未输入具体问题）",
+        "card": selected,
+        "is_upright": is_upright,
+        "orientation": followup_card["orientation"],
+        "keywords": followup_card["keywords"],
+        "meaning": followup_card["meaning"],
+        "reading": followup_reading,
+    }
+
+    if "followup_history" not in st.session_state:
+        st.session_state.followup_history = []
+    st.session_state.followup_history.append(record)
+    st.session_state.followup_count = followup_count + 1
+
+
 def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
     """根据牌阵类型构建不同的 AI prompt"""
 
@@ -603,7 +816,14 @@ def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
 - 【今日温馨提示】（40-60字）
   一句温暖的鼓励
 
-要求：语言自然，像朋友聊天，避免AI套话，不要说"首先其次最后"。"""
+要求：语言自然，像朋友聊天，避免AI套话，不要说"首先其次最后"。
+
+【语气与方法要求】
+1. 温暖积极为主基调，相信用户有力量面对一切
+2. 融入教练问话技术：多用启发性问题代替直接建议，例如"不妨问问自己，如果抛开顾虑，你最想尝试什么？"
+3. 运用心理学视角：融入自我觉察、内在动机、情绪识别等概念
+4. 对于不合理的期待或逃避倾向，温和地点出供用户自行判断，例如"这张牌提醒我们，也许现在是个好时机去审视一下..."
+5. 不要说教，不要用"你应该"，而是引导用户自己发现答案"""
 
     elif spread_type == "问题指引":
         return f"""你是一位温暖、富有人文关怀的塔罗师。
@@ -633,7 +853,14 @@ def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
 - 【核心提醒】（60-80字）
   一句话总结这个问题的关键能量，给出最重要的行动指引
 
-要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。"""
+要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。
+
+【语气与方法要求】
+1. 温暖积极为主基调，相信用户有力量面对一切
+2. 融入教练问话技术：多用启发性问题代替直接建议，例如"不妨问问自己，如果抛开顾虑，你最想尝试什么？"
+3. 运用心理学视角：融入自我觉察、内在动机、情绪识别等概念
+4. 对于不合理的期待或逃避倾向，温和地点出供用户自行判断
+5. 不要说教，不要用"你应该"，而是引导用户自己发现答案"""
 
     elif spread_type == "单牌指引":
         return f"""你是一位温暖、富有人文关怀的塔罗师。
@@ -655,7 +882,14 @@ def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
 - 【一句话点睛】（30-50字）
   一句温暖有力的总结
 
-要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。"""
+要求：紧扣问题"{question}"进行解读，语言自然，像朋友聊天，避免AI套话。
+
+【语气与方法要求】
+1. 温暖积极为主基调，相信用户有力量面对一切
+2. 融入教练问话技术：多用启发性问题代替直接建议
+3. 运用心理学视角：融入自我觉察、内在动机等概念
+4. 对于不合理的期待或逃避倾向，温和地点出供用户自行判断
+5. 不要说教，不要用"你应该"，而是引导用户自己发现答案"""
 
     elif spread_type == "二选一":
         return f"""你是一位温暖、富有人文关怀的塔罗师。
@@ -688,7 +922,14 @@ def _build_prompt(cards, cards_text, date_str, spread_type, question, history):
 - 【综合建议】（100-150字）
   综合五张牌的能量对比，客观分析各自的优劣势，帮助看清两条路的不同走向
 
-要求：紧扣问题"{question}"进行解读。不要直接告诉选A还是选B，而是分析各自的能量走向，尊重问卜者的自由意志。语言自然，像朋友聊天，避免AI套话。"""
+要求：紧扣问题"{question}"进行解读。不要直接告诉选A还是选B，而是分析各自的能量走向，尊重问卜者的自由意志。语言自然，像朋友聊天，避免AI套话。
+
+【语气与方法要求】
+1. 温暖积极为主基调，相信用户有力量面对一切
+2. 融入教练问话技术：多用启发性问题代替直接建议，例如"如果两个选择都不会失败，你的心会先走向哪一边？"
+3. 运用心理学视角：融入自我觉察、内在动机、价值观澄清等概念
+4. 对于不合理的期待或逃避倾向，温和地点出供用户自行判断
+5. 不要说教，不要用"你应该"，而是引导用户自己发现答案"""
 
     return ""
 
@@ -783,6 +1024,10 @@ if st.button(button_labels.get(spread_type, "✨ 开始占卜"), use_container_w
         st.session_state.draw_id = str(uuid.uuid4())
         st.session_state.spread_type = spread_type
         st.session_state.question = question.strip()
+        # 初始化追问状态（非每日运势模式）
+        if spread_type != "每日运势":
+            st.session_state.followup_count = 0
+            st.session_state.followup_history = []
         if nickname.strip():
             save_user_draw(nickname.strip(), today, st.session_state.cards)
 
@@ -879,6 +1124,48 @@ if "cards" in st.session_state and st.session_state.cards:
                 mark = "↑" if c["orientation"] == "正位" else "↓"
                 card_tags += f'<span style="display:inline-block;padding:3px 10px;margin:2px;border-radius:6px;font-size:0.8em;background:rgba(255,255,255,0.06);color:{color};border:1px solid {color}30;">{c["name_cn"]} {mark}</span>'
             st.markdown(f"<p style='color:#8880a0;margin-bottom:4px;'>{day['date']}</p>{card_tags}", unsafe_allow_html=True)
+
+    # ========== 追问系统 ==========
+    if current_spread != "每日运势" and st.session_state.get("reading") and st.session_state.reading != "fallback":
+        st.markdown("---")
+
+        followup_count = st.session_state.get("followup_count", 0)
+        followup_max = 3
+        remaining = followup_max - followup_count
+
+        st.markdown(
+            f"<h3 style='text-align:center;'>💬 深度追问 (剩余 {remaining}/{followup_max} 次)</h3>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align:center;color:#8880a0;font-size:0.85em;'>"
+            "塔罗帮你找到内心的声音，追问解读会引导你深入思考"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
+        # 按时间正序显示追问历史
+        followup_history = st.session_state.get("followup_history", [])
+        for followup in followup_history:
+            _render_followup_item(followup)
+
+        # 追问输入区
+        if remaining > 0:
+            followup_question = st.text_input(
+                "追问内容（选填，可留空）",
+                placeholder="例如：如果选择A，感情方面会怎样发展？",
+                key=f"followup_q_{followup_count}",
+            )
+
+            if st.button("🔮 抽取追问牌", key=f"followup_btn_{followup_count}", use_container_width=True):
+                with st.spinner("正在为你解读追问..."):
+                    _handle_followup_draw(followup_question.strip())
+                st.rerun()
+        else:
+            st.markdown(
+                "<div class='blessing'>✨ 已用完所有追问机会，愿你找到内心的答案 ✨</div>",
+                unsafe_allow_html=True,
+            )
 
     # 祝福语
     st.markdown("<div class='blessing'>✨ 愿灵感照亮你的方向 ✨</div>", unsafe_allow_html=True)
