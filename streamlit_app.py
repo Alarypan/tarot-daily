@@ -481,10 +481,13 @@ def get_image_url(img_code: str) -> str:
     return f"{IMG_BASE}/{img_code}.jpg"
 
 
-def generate_share_image(cards, spread_type, question, reading_text, date_str, target_name=""):
+def generate_share_image(cards, spread_type, question, reading_text, date_str, target_name="", followup_history=None):
     """生成分享图片，包含牌面图片和解读摘要"""
     from PIL import Image, ImageDraw, ImageFont
     import requests
+    
+    if followup_history is None:
+        followup_history = []
     
     # 图片尺寸（适合手机分享）
     WIDTH = 750
@@ -498,14 +501,16 @@ def generate_share_image(cards, spread_type, question, reading_text, date_str, t
     GOLD_COLOR = (212, 175, 55)
     LIGHT_PURPLE = (160, 152, 176)
     
-    # 计算高度（根据牌数和内容动态调整）
+    # 计算高度（根据牌数和追问内容动态调整）
     num_cards = len(cards)
-    # 标题区 + 牌面区 + 解读摘要区 + 底部
+    num_followup = len(followup_history)
+    # 标题区 + 牌面区 + 解读摘要区 + 追问区（如果有）+ 底部
     HEADER_HEIGHT = 120
     CARD_SECTION_HEIGHT = CARD_HEIGHT + 80  # 牌面 + 牌名
-    SUMMARY_HEIGHT = 400  # 解读摘要区
+    SUMMARY_HEIGHT = 350  # 解读摘要区
+    FOLLOWUP_HEIGHT = 150 * num_followup if num_followup > 0 else 0  # 每个追问约150像素
     FOOTER_HEIGHT = 60
-    HEIGHT = HEADER_HEIGHT + CARD_SECTION_HEIGHT + SUMMARY_HEIGHT + FOOTER_HEIGHT
+    HEIGHT = HEADER_HEIGHT + CARD_SECTION_HEIGHT + SUMMARY_HEIGHT + FOLLOWUP_HEIGHT + FOOTER_HEIGHT
     
     # 创建画布
     img = Image.new('RGB', (WIDTH, HEIGHT), BG_COLOR)
@@ -625,9 +630,33 @@ def generate_share_image(cards, spread_type, question, reading_text, date_str, t
     
     summary_lines = wrap_text(summary, summary_font, WIDTH - 2 * PADDING)
     
-    for line in summary_lines[:15]:  # 最多显示15行
+    for line in summary_lines[:12]:  # 最多显示12行
         draw.text((PADDING, y_offset), line, fill=TEXT_COLOR, font=summary_font)
         y_offset += 24
+    
+    # ===== 绘制追问区（如果有） =====
+    if followup_history:
+        y_offset += 20
+        draw.line([(PADDING, y_offset), (WIDTH - PADDING, y_offset)], fill=GOLD_COLOR, width=1)
+        y_offset += 15
+        draw.text((WIDTH // 2, y_offset), "— 追问解读 —", fill=GOLD_COLOR, font=subtitle_font, anchor="mt")
+        y_offset += 35
+        
+        for i, fh in enumerate(followup_history[:2], 1):  # 最多显示2个追问
+            # 追问牌名
+            followup_card_text = f"【追问{i}】{fh['card']['name_cn']}（{fh['orientation']}）"
+            draw.text((PADDING, y_offset), followup_card_text, fill=GOLD_COLOR, font=card_name_font)
+            y_offset += 25
+            
+            # 追问解读摘要
+            fh_summary = fh.get('reading', '')[:150].replace('\n', ' ').strip()
+            if len(fh.get('reading', '')) > 150:
+                fh_summary += "..."
+            fh_lines = wrap_text(fh_summary, summary_font, WIDTH - 2 * PADDING)
+            for line in fh_lines[:4]:  # 每个追问最多4行
+                draw.text((PADDING, y_offset), line, fill=TEXT_COLOR, font=summary_font)
+                y_offset += 22
+            y_offset += 10
     
     # ===== 绘制底部 =====
     y_offset = HEIGHT - FOOTER_HEIGHT + 10
@@ -640,6 +669,9 @@ def generate_share_image(cards, spread_type, question, reading_text, date_str, t
     img.save(buffer, format='PNG', quality=95)
     buffer.seek(0)
     return buffer
+
+
+def _load_all_history() -> dict:
     if HISTORY_FILE.exists():
         try:
             return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
@@ -1380,13 +1412,15 @@ if "cards" in st.session_state and st.session_state.cards:
                 if st.button("🖼️ 生成分享图片", use_container_width=True, key="gen_share_image"):
                     with st.spinner("正在生成分享图片..."):
                         try:
+                            followup_history = st.session_state.get("followup_history", [])
                             share_img = generate_share_image(
                                 cards=cards,
                                 spread_type=current_spread,
                                 question=current_question,
                                 reading_text=st.session_state.reading,
                                 date_str=today,
-                                target_name=target_name_display
+                                target_name=target_name_display,
+                                followup_history=followup_history
                             )
                             st.session_state.share_image = share_img
                             st.success("图片生成成功！点击下方按钮保存")
@@ -1397,6 +1431,18 @@ if "cards" in st.session_state and st.session_state.cards:
                 # 复制文本按钮（备用）
                 if st.button("📋 复制文字版", use_container_width=True, key="copy_reading"):
                     card_names = " | ".join([f"{c['card']['name_cn']}（{c['orientation']}）" for c in cards])
+                    
+                    # 构建完整分享文本，包含追问内容
+                    full_reading = st.session_state.reading
+                    followup_history = st.session_state.get("followup_history", [])
+                    if followup_history:
+                        full_reading += "\n\n--- 追问解读 ---"
+                        for i, fh in enumerate(followup_history, 1):
+                            full_reading += f"\n\n【追问{i}】{fh['card']['name_cn']}（{fh['orientation']}）"
+                            if fh.get('question'):
+                                full_reading += f"\n❓ {fh['question']}"
+                            full_reading += f"\n{fh['reading']}"
+                    
                     share_text = f"""🔮 塔罗牌灵感指引
 📅 {today}
 🃏 {current_spread}
@@ -1404,7 +1450,7 @@ if "cards" in st.session_state and st.session_state.cards:
 
 【牌面】{card_names}
 
-{st.session_state.reading}
+{full_reading}
 
 ---
 ✨ 来自塔罗牌灵感指引"""
