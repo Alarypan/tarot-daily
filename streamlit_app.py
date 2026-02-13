@@ -19,6 +19,17 @@ st.set_page_config(
     layout="centered",
 )
 
+# ========== PWA 支持 ==========
+st.markdown("""
+<link rel="manifest" href="./static/manifest.json">
+<link rel="apple-touch-icon" href="./static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="塔罗指引">
+<meta name="theme-color" content="#6b5b95">
+<meta name="mobile-web-app-capable" content="yes">
+""", unsafe_allow_html=True)
+
 # ========== 样式 ==========
 st.markdown("""
 <style>

@@ -1,0 +1,24 @@
+{
+  "name": "塔罗牌灵感指引",
+  "short_name": "塔罗指引",
+  "description": "韦特塔罗牌占卜应用，支持每日运势、问题指引、单牌指引、二选一等多种牌阵",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#6b5b95",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
