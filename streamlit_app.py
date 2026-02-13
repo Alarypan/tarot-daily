@@ -481,133 +481,59 @@ def get_image_url(img_code: str) -> str:
     return f"{IMG_BASE}/{img_code}.jpg"
 
 
-def generate_share_image(cards, spread_type, question, reading_text, date_str, target_name="", followup_history=None):
-    """生成分享图片，包含牌面图片和解读摘要"""
+def _strip_html(text):
+    """去除HTML标签，保留纯文本"""
+    import re
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    return text.strip()
+
+
+def generate_forward_image(cards, spread_type, question, reading_text, date_str, target_name="", followup_history=None):
+    """生成转发长图，包含牌面图片和完整解读内容"""
     from PIL import Image, ImageDraw, ImageFont
     import requests
-    
+
     if followup_history is None:
         followup_history = []
-    
-    # 图片尺寸（适合手机分享）
+
     WIDTH = 750
-    CARD_WIDTH = 180
-    CARD_HEIGHT = 310
     PADDING = 30
-    
-    # 颜色定义
-    BG_COLOR = (43, 36, 58)  # 深紫色背景
+    LINE_HEIGHT = 28
+    SECTION_GAP = 25
+
+    # 颜色
+    BG_COLOR = (43, 36, 58)
     TEXT_COLOR = (255, 255, 255)
     GOLD_COLOR = (212, 175, 55)
     LIGHT_PURPLE = (160, 152, 176)
-    
-    # 计算高度（根据牌数和追问内容动态调整）
-    num_cards = len(cards)
-    num_followup = len(followup_history)
-    # 标题区 + 牌面区 + 解读摘要区 + 追问区（如果有）+ 底部
-    HEADER_HEIGHT = 120
-    CARD_SECTION_HEIGHT = CARD_HEIGHT + 80  # 牌面 + 牌名
-    SUMMARY_HEIGHT = 350  # 解读摘要区
-    FOLLOWUP_HEIGHT = 150 * num_followup if num_followup > 0 else 0  # 每个追问约150像素
-    FOOTER_HEIGHT = 60
-    HEIGHT = HEADER_HEIGHT + CARD_SECTION_HEIGHT + SUMMARY_HEIGHT + FOLLOWUP_HEIGHT + FOOTER_HEIGHT
-    
-    # 创建画布
-    img = Image.new('RGB', (WIDTH, HEIGHT), BG_COLOR)
-    draw = ImageDraw.Draw(img)
-    
-    # 尝试加载中文字体
-    def get_font(size, bold=False):
-        # Linux (Streamlit Cloud) 常见字体路径
+
+    # 字体加载
+    def get_font(size):
         font_paths = [
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
             "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-            # macOS
             "/System/Library/Fonts/PingFang.ttc",
             "/System/Library/Fonts/STHeiti Medium.ttc",
         ]
-        for font_path in font_paths:
+        for fp in font_paths:
             try:
-                return ImageFont.truetype(font_path, size)
+                return ImageFont.truetype(fp, size)
             except (IOError, OSError):
                 continue
-        # 如果都找不到，使用默认字体
         return ImageFont.load_default()
-    
-    title_font = get_font(36, bold=True)
+
+    title_font = get_font(36)
     subtitle_font = get_font(20)
     card_name_font = get_font(18)
-    summary_font = get_font(18)
+    body_font = get_font(17)
+    section_font = get_font(22)
     footer_font = get_font(14)
-    
-    # ===== 绘制标题区 =====
-    y_offset = PADDING
-    
-    # 主标题
-    title = "🔮 塔罗牌灵感指引"
-    draw.text((WIDTH // 2, y_offset), title, fill=GOLD_COLOR, font=title_font, anchor="mt")
-    y_offset += 50
-    
-    # 副标题（日期 + 牌阵类型）
-    target_text = f"· 为{target_name}占卜" if target_name else ""
-    subtitle = f"📅 {date_str} · {spread_type}{target_text}"
-    draw.text((WIDTH // 2, y_offset), subtitle, fill=LIGHT_PURPLE, font=subtitle_font, anchor="mt")
-    y_offset += 40
-    
-    # 问题（如果有）
-    if question:
-        q_text = f"❓ {question[:30]}{'...' if len(question) > 30 else ''}"
-        draw.text((WIDTH // 2, y_offset), q_text, fill=TEXT_COLOR, font=subtitle_font, anchor="mt")
-    y_offset = HEADER_HEIGHT
-    
-    # ===== 绘制牌面区 =====
-    # 下载并排列牌面图片
-    card_images = []
-    for c in cards:
-        card = c["card"]
-        img_url = get_image_url(card["img"])
-        try:
-            resp = requests.get(img_url, timeout=10)
-            if resp.status_code == 200:
-                card_img = Image.open(BytesIO(resp.content))
-                # 调整大小
-                card_img = card_img.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
-                # 如果是逆位，旋转180度
-                if c["orientation"] == "逆位":
-                    card_img = card_img.rotate(180)
-                card_images.append((card_img, c))
-        except Exception:
-            # 如果下载失败，创建占位符
-            placeholder = Image.new('RGB', (CARD_WIDTH, CARD_HEIGHT), (80, 70, 100))
-            card_images.append((placeholder, c))
-    
-    # 计算牌面水平排列位置
-    total_card_width = num_cards * CARD_WIDTH + (num_cards - 1) * 15
-    start_x = (WIDTH - total_card_width) // 2
-    
-    for i, (card_img, c) in enumerate(card_images):
-        x = start_x + i * (CARD_WIDTH + 15)
-        img.paste(card_img, (x, y_offset))
-        
-        # 牌名
-        card_name = f"{c['card']['name_cn']} · {c['orientation']}"
-        draw.text((x + CARD_WIDTH // 2, y_offset + CARD_HEIGHT + 10), 
-                  card_name, fill=TEXT_COLOR, font=card_name_font, anchor="mt")
-    
-    y_offset += CARD_SECTION_HEIGHT
-    
-    # ===== 绘制解读摘要区 =====
-    draw.line([(PADDING, y_offset), (WIDTH - PADDING, y_offset)], fill=LIGHT_PURPLE, width=1)
-    y_offset += 20
-    
-    # 提取解读摘要（取前300字符）
-    summary = reading_text[:350].replace('\n\n', '\n').strip()
-    if len(reading_text) > 350:
-        summary += "..."
-    
-    # 文字换行
+
+    # 文字换行工具
     def wrap_text(text, font, max_width):
         lines = []
         for paragraph in text.split('\n'):
@@ -627,44 +553,174 @@ def generate_share_image(cards, spread_type, question, reading_text, date_str, t
             if current_line:
                 lines.append(current_line)
         return lines
-    
-    summary_lines = wrap_text(summary, summary_font, WIDTH - 2 * PADDING)
-    
-    for line in summary_lines[:12]:  # 最多显示12行
-        draw.text((PADDING, y_offset), line, fill=TEXT_COLOR, font=summary_font)
-        y_offset += 24
-    
-    # ===== 绘制追问区（如果有） =====
-    if followup_history:
-        y_offset += 20
-        draw.line([(PADDING, y_offset), (WIDTH - PADDING, y_offset)], fill=GOLD_COLOR, width=1)
-        y_offset += 15
-        draw.text((WIDTH // 2, y_offset), "— 追问解读 —", fill=GOLD_COLOR, font=subtitle_font, anchor="mt")
-        y_offset += 35
-        
-        for i, fh in enumerate(followup_history[:3], 1):  # 显示全部追问（最多3个）
-            # 追问牌名
-            followup_card_text = f"【追问{i}】{fh['card']['name_cn']}（{fh['orientation']}）"
-            draw.text((PADDING, y_offset), followup_card_text, fill=GOLD_COLOR, font=card_name_font)
-            y_offset += 25
-            
-            # 追问解读摘要
-            fh_summary = fh.get('reading', '')[:150].replace('\n', ' ').strip()
-            if len(fh.get('reading', '')) > 150:
-                fh_summary += "..."
-            fh_lines = wrap_text(fh_summary, summary_font, WIDTH - 2 * PADDING)
-            for line in fh_lines[:4]:  # 每个追问最多4行
-                draw.text((PADDING, y_offset), line, fill=TEXT_COLOR, font=summary_font)
-                y_offset += 22
-            y_offset += 10
-    
-    # ===== 绘制底部 =====
-    y_offset = HEIGHT - FOOTER_HEIGHT + 10
-    draw.line([(PADDING, y_offset - 15), (WIDTH - PADDING, y_offset - 15)], fill=LIGHT_PURPLE, width=1)
-    footer_text = "✨ 塔罗牌灵感指引 · 聆听内心的声音"
-    draw.text((WIDTH // 2, y_offset), footer_text, fill=LIGHT_PURPLE, font=footer_font, anchor="mt")
-    
-    # 返回图片字节
+
+    max_text_width = WIDTH - 2 * PADDING
+
+    # 清理HTML标签
+    clean_reading = _strip_html(reading_text)
+
+    # 预计算所有文本行数以确定图片高度
+    reading_lines = wrap_text(clean_reading, body_font, max_text_width)
+
+    followup_lines_list = []
+    for fh in followup_history:
+        fh_text = _strip_html(fh.get('reading', ''))
+        fh_lines = wrap_text(fh_text, body_font, max_text_width)
+        q_text = fh.get('question', '')
+        q_lines = wrap_text(f"❓ {q_text}", body_font, max_text_width) if q_text else []
+        followup_lines_list.append((fh, q_lines, fh_lines))
+
+    # 根据牌数确定牌面区域布局
+    num_cards = len(cards)
+    if num_cards <= 3:
+        CARD_WIDTH = 180
+        CARD_HEIGHT = 310
+        card_rows = 1
+    else:
+        # 二选一5张牌：第一行1张(核心)，第二行2张(选择)，第三行2张(结果)
+        CARD_WIDTH = 160
+        CARD_HEIGHT = 276
+        card_rows = 3
+
+    CARD_SECTION_HEIGHT = (CARD_HEIGHT + 50) * card_rows + 20
+
+    # 计算总高度
+    HEADER_HEIGHT = 130
+    READING_HEIGHT = len(reading_lines) * LINE_HEIGHT + SECTION_GAP * 2
+    FOLLOWUP_HEIGHT = 0
+    if followup_lines_list:
+        FOLLOWUP_HEIGHT += 60  # 追问标题区
+        for _, q_lines, fh_lines in followup_lines_list:
+            FOLLOWUP_HEIGHT += 35  # 追问牌名行
+            FOLLOWUP_HEIGHT += len(q_lines) * LINE_HEIGHT  # 问题
+            FOLLOWUP_HEIGHT += len(fh_lines) * LINE_HEIGHT  # 解读
+            FOLLOWUP_HEIGHT += SECTION_GAP
+    FOOTER_HEIGHT = 70
+    HEIGHT = HEADER_HEIGHT + CARD_SECTION_HEIGHT + READING_HEIGHT + FOLLOWUP_HEIGHT + FOOTER_HEIGHT
+
+    # 创建画布
+    img = Image.new('RGB', (WIDTH, HEIGHT), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+    y = PADDING
+
+    # ===== 标题区 =====
+    title = "🔮 塔罗牌灵感指引"
+    draw.text((WIDTH // 2, y), title, fill=GOLD_COLOR, font=title_font, anchor="mt")
+    y += 50
+
+    target_text = f" · 为{target_name}占卜" if target_name else ""
+    subtitle = f"📅 {date_str} · {spread_type}{target_text}"
+    draw.text((WIDTH // 2, y), subtitle, fill=LIGHT_PURPLE, font=subtitle_font, anchor="mt")
+    y += 35
+
+    if question:
+        q_display = f"❓ {question[:50]}{'...' if len(question) > 50 else ''}"
+        draw.text((WIDTH // 2, y), q_display, fill=TEXT_COLOR, font=subtitle_font, anchor="mt")
+        y += 30
+
+    y = HEADER_HEIGHT
+
+    # ===== 牌面区 =====
+    card_images = []
+    for c in cards:
+        card = c["card"]
+        img_url = get_image_url(card["img"])
+        try:
+            resp = requests.get(img_url, timeout=10)
+            if resp.status_code == 200:
+                card_img = Image.open(BytesIO(resp.content))
+                card_img = card_img.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
+                if c["orientation"] == "逆位":
+                    card_img = card_img.rotate(180)
+                card_images.append((card_img, c))
+        except Exception:
+            placeholder = Image.new('RGB', (CARD_WIDTH, CARD_HEIGHT), (80, 70, 100))
+            card_images.append((placeholder, c))
+
+    if num_cards <= 3:
+        # 单行排列
+        gap = 15
+        total_w = num_cards * CARD_WIDTH + (num_cards - 1) * gap
+        sx = (WIDTH - total_w) // 2
+        for i, (cimg, c) in enumerate(card_images):
+            x = sx + i * (CARD_WIDTH + gap)
+            img.paste(cimg, (x, y))
+            name = f"{c['card']['name_cn']} · {c['orientation']}"
+            draw.text((x + CARD_WIDTH // 2, y + CARD_HEIGHT + 8), name, fill=TEXT_COLOR, font=card_name_font, anchor="mt")
+        y += CARD_HEIGHT + 50
+    else:
+        # 二选一5张牌: 核心(1) + 选择(2) + 结果(2)
+        gap = 15
+        # 第一行：核心牌居中
+        cx = (WIDTH - CARD_WIDTH) // 2
+        img.paste(card_images[0][0], (cx, y))
+        name = f"核心 · {card_images[0][1]['card']['name_cn']} · {card_images[0][1]['orientation']}"
+        draw.text((cx + CARD_WIDTH // 2, y + CARD_HEIGHT + 8), name, fill=TEXT_COLOR, font=card_name_font, anchor="mt")
+        y += CARD_HEIGHT + 50
+
+        # 第二行：选择A + 选择B
+        total_w = 2 * CARD_WIDTH + gap
+        sx = (WIDTH - total_w) // 2
+        for i in range(1, 3):
+            if i < len(card_images):
+                x = sx + (i - 1) * (CARD_WIDTH + gap)
+                img.paste(card_images[i][0], (x, y))
+                label = "选择A" if i == 1 else "选择B"
+                name = f"{label} · {card_images[i][1]['card']['name_cn']} · {card_images[i][1]['orientation']}"
+                draw.text((x + CARD_WIDTH // 2, y + CARD_HEIGHT + 8), name, fill=TEXT_COLOR, font=card_name_font, anchor="mt")
+        y += CARD_HEIGHT + 50
+
+        # 第三行：A结果 + B结果
+        for i in range(3, 5):
+            if i < len(card_images):
+                x = sx + (i - 3) * (CARD_WIDTH + gap)
+                img.paste(card_images[i][0], (x, y))
+                label = "A结果" if i == 3 else "B结果"
+                name = f"{label} · {card_images[i][1]['card']['name_cn']} · {card_images[i][1]['orientation']}"
+                draw.text((x + CARD_WIDTH // 2, y + CARD_HEIGHT + 8), name, fill=TEXT_COLOR, font=card_name_font, anchor="mt")
+        y += CARD_HEIGHT + 50
+
+    # ===== 解读全文区 =====
+    draw.line([(PADDING, y), (WIDTH - PADDING, y)], fill=LIGHT_PURPLE, width=1)
+    y += SECTION_GAP
+
+    for line in reading_lines:
+        draw.text((PADDING, y), line, fill=TEXT_COLOR, font=body_font)
+        y += LINE_HEIGHT
+
+    # ===== 追问区 =====
+    if followup_lines_list:
+        y += SECTION_GAP
+        draw.line([(PADDING, y), (WIDTH - PADDING, y)], fill=GOLD_COLOR, width=1)
+        y += 15
+        draw.text((WIDTH // 2, y), "— 追问解读 —", fill=GOLD_COLOR, font=section_font, anchor="mt")
+        y += 40
+
+        for idx, (fh, q_lines, fh_lines) in enumerate(followup_lines_list, 1):
+            card_text = f"【追问{idx}】{fh['card']['name_cn']}（{fh['orientation']}）"
+            draw.text((PADDING, y), card_text, fill=GOLD_COLOR, font=card_name_font)
+            y += 30
+
+            for line in q_lines:
+                draw.text((PADDING, y), line, fill=LIGHT_PURPLE, font=body_font)
+                y += LINE_HEIGHT
+
+            for line in fh_lines:
+                draw.text((PADDING, y), line, fill=TEXT_COLOR, font=body_font)
+                y += LINE_HEIGHT
+            y += SECTION_GAP
+
+    # ===== 底部 =====
+    y += 10
+    draw.line([(PADDING, y), (WIDTH - PADDING, y)], fill=LIGHT_PURPLE, width=1)
+    y += 15
+    draw.text((WIDTH // 2, y), "✨ 塔罗牌灵感指引 · 聆听内心的声音 ✨", fill=LIGHT_PURPLE, font=footer_font, anchor="mt")
+
+    # 裁剪到实际高度（去除多余空白）
+    actual_height = y + 40
+    if actual_height < HEIGHT:
+        img = img.crop((0, 0, WIDTH, actual_height))
+
     buffer = BytesIO()
     img.save(buffer, format='PNG', quality=95)
     buffer.seek(0)
@@ -958,6 +1014,7 @@ def _handle_followup_draw(followup_question):
         st.session_state.followup_history = []
     st.session_state.followup_history.append(record)
     st.session_state.followup_count = followup_count + 1
+    st.session_state.forward_image = None  # 清除旧转发图片
 
 
 def _build_prompt(cards, cards_text, date_str, spread_type, question, history, target_name=""):
@@ -1318,6 +1375,7 @@ if st.button(button_labels.get(spread_type, "✨ 开始占卜"), use_container_w
         st.session_state.question = question.strip()
         st.session_state.current_divination_mode = divination_mode
         st.session_state.target_name = target_name.strip() if divination_mode == "为TA占卜" else ""
+        st.session_state.forward_image = None
         # 初始化追问状态（非每日运势模式）
         if spread_type != "每日运势":
             st.session_state.followup_count = 0
@@ -1401,78 +1459,6 @@ if "cards" in st.session_state and st.session_state.cards:
 
         if st.session_state.reading and st.session_state.reading != "fallback":
             st.markdown(f"<div class='reading-section'>{st.session_state.reading}</div>", unsafe_allow_html=True)
-            
-            # 分享功能
-            st.markdown("---")
-            target_name_display = st.session_state.get("target_name", "")
-            
-            col_share1, col_share2 = st.columns(2)
-            with col_share1:
-                # 生成分享图片按钮
-                if st.button("🖼️ 生成分享图片", use_container_width=True, key="gen_share_image"):
-                    with st.spinner("正在生成分享图片..."):
-                        try:
-                            followup_history = st.session_state.get("followup_history", [])
-                            share_img = generate_share_image(
-                                cards=cards,
-                                spread_type=current_spread,
-                                question=current_question,
-                                reading_text=st.session_state.reading,
-                                date_str=today,
-                                target_name=target_name_display,
-                                followup_history=followup_history
-                            )
-                            st.session_state.share_image = share_img
-                            st.success("图片生成成功！点击下方按钮保存")
-                        except Exception as e:
-                            st.error(f"图片生成失败：{str(e)}")
-            
-            with col_share2:
-                # 复制文本按钮（备用）
-                if st.button("📋 复制文字版", use_container_width=True, key="copy_reading"):
-                    card_names = " | ".join([f"{c['card']['name_cn']}（{c['orientation']}）" for c in cards])
-                    
-                    # 构建完整分享文本，包含追问内容
-                    full_reading = st.session_state.reading
-                    followup_history = st.session_state.get("followup_history", [])
-                    if followup_history:
-                        full_reading += "\n\n--- 追问解读 ---"
-                        for i, fh in enumerate(followup_history, 1):
-                            full_reading += f"\n\n【追问{i}】{fh['card']['name_cn']}（{fh['orientation']}）"
-                            if fh.get('question'):
-                                full_reading += f"\n❓ {fh['question']}"
-                            full_reading += f"\n{fh['reading']}"
-                    
-                    share_text = f"""🔮 塔罗牌灵感指引
-📅 {today}
-🃏 {current_spread}
-{f"❓ {current_question}" if current_question else ""}
-
-【牌面】{card_names}
-
-{full_reading}
-
----
-✨ 来自塔罗牌灵感指引"""
-                    st.session_state.share_text = share_text
-                    st.session_state.share_image = None  # 清除图片状态
-                    st.success("已生成，请在下方复制")
-            
-            # 显示生成的分享图片
-            if st.session_state.get("share_image"):
-                st.image(st.session_state.share_image, caption="长按保存图片，或点击下方按钮下载", use_container_width=True)
-                # 下载按钮
-                st.download_button(
-                    label="📥 下载分享图片",
-                    data=st.session_state.share_image,
-                    file_name=f"tarot_{today}_{current_spread}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            
-            # 显示文字版（如果选择了复制文字）
-            elif st.session_state.get("share_text"):
-                st.text_area("分享文本（长按复制）", st.session_state.share_text, height=200, key="share_textarea")
         else:
             for c in cards:
                 st.markdown(f"**【{c['position']} - {c['card']['name_cn']}（{c['orientation']}）】**")
@@ -1534,6 +1520,38 @@ if "cards" in st.session_state and st.session_state.cards:
             st.markdown(
                 "<div class='blessing'>✨ 已用完所有追问机会，愿你找到内心的答案 ✨</div>",
                 unsafe_allow_html=True,
+            )
+
+    # ========== 转发功能 ==========
+    if st.session_state.get("reading") and st.session_state.reading != "fallback":
+        st.markdown("---")
+        if st.button("📤 转发", use_container_width=True, key="forward_btn"):
+            with st.spinner("正在生成转发图片..."):
+                try:
+                    followup_history = st.session_state.get("followup_history", [])
+                    target_name_display = st.session_state.get("target_name", "")
+                    forward_img = generate_forward_image(
+                        cards=cards,
+                        spread_type=current_spread,
+                        question=current_question,
+                        reading_text=st.session_state.reading,
+                        date_str=today,
+                        target_name=target_name_display,
+                        followup_history=followup_history,
+                    )
+                    st.session_state.forward_image = forward_img
+                except Exception as e:
+                    st.error(f"生成失败：{str(e)}")
+
+        if st.session_state.get("forward_image"):
+            st.image(st.session_state.forward_image, caption="长按保存图片，或点击下方按钮下载", use_container_width=True)
+            st.download_button(
+                label="📥 下载图片",
+                data=st.session_state.forward_image,
+                file_name=f"tarot_{today}_{current_spread}.png",
+                mime="image/png",
+                use_container_width=True,
+                key="download_forward_img",
             )
 
     # 祝福语
